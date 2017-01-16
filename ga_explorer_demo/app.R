@@ -22,15 +22,15 @@ view_id <- Sys.getenv("GA_VIEW_ID")
 start_date <- as.character(Sys.Date()-31)
 end_date <- as.character(Sys.Date()-1)
 
-# View ID
-view_id <- "ga:66876757"
-
 # List of metrics that can be used
 metric_options <- c("sessions","pageviews","totalEvents")
 
 # List of dimensions that can be used
 dimension_options <- list("New vs. Returning" = "userType",
-  "Device Category" = "deviceCategory",
+                          "Device Category" = "deviceCategory",
+                          "Mobile Device" = "mobileDeviceBranding",
+                          "Browser" = "browser",
+                          "Operating System" = "operatingSystem",
                           "Default Channel Grouping" = "channelGrouping",
                           "Source" = "source",
                           "Medium" = "medium",
@@ -117,7 +117,7 @@ ui <- fluidPage(
   # Sidebar with a slider input for number of bins 
   sidebarLayout(
     sidebarPanel(
-
+      
       selectInput("x_dim", label = "Select the X dimension and how many values to show:", 
                   choices = dimension_options, 
                   selected = "deviceCategory"),
@@ -128,25 +128,23 @@ ui <- fluidPage(
                   min = 1,
                   max = 5,
                   value = 3),
-      
-      HTML('<hr style="color: #FFFFFF;">'),
-
+    
       selectInput("y_dim", label = "Select the Y dimension and how many values to show:", 
                   choices = dimension_options, 
                   selected = "userType"),
- 
+      
       # Select the max number of values to show in the Y dimension
       sliderInput("dim_y_count",
                   "",
                   min = 1,
                   max = 8,
                   value = 2)
-      
     ),
     
     # Show the heatmap and sparklines
     mainPanel(
       plotOutput("heatmap"),
+      tags$hr(),
       plotOutput("sparklines")
     )
   )
@@ -172,7 +170,7 @@ server <- function(input, output) {
     
     x_includes <- dim_x_includes()
     y_includes <- dim_y_includes()
-
+    
     # Filter the data down to just include the "top X" dimensions (for both values) and
     # then total them up.
     plot_totals <- base_data() %>% as.data.frame() %>% 
@@ -197,7 +195,7 @@ server <- function(input, output) {
     y_includes <- dim_y_includes()
     
     plot_trends <- filter(base_data(), dim_x %in% x_includes$dim_x, dim_y %in% y_includes$dim_y)
-
+    
     # To control the facet order, we need to change dim1 and dim2 to be factors. The
     # order comes from the dim_x_includes$dimx values
     plot_trends$dim_x <- factor(plot_trends$dim_x,
