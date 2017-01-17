@@ -1,23 +1,32 @@
 #
-# App to explore Google Analytics metrics across two dimensions. The only REQUIRED
-# setup to get this to run is the either the hardcoding of a view_id or the creation
-# of a .Renviron file with a GA_VIEW_ID defined. This is detailed in the first lengthy
-# comment below.
+# App to explore Adobe Analytics metrics across two dimensions. The only REQUIRED
+# setup to get this to run is the either the hardcoding of API credentials and an RSID
+# or the creation of a .Renviron file with a GA_VIEW_ID defined. This is detailed in 
+# the first lengthy comment below.
 #
 
 library(shiny)              # We must web-enable this whole thing
-library(googleAnalyticsR)   # For the pulling of the data
+## library(googleAnalyticsR)   # For the pulling of the data
+library(RSiteCatalyst)      # For pulling the data
 library(tidyverse)          # For data transformations -- primarily just uses dplyr commands
 library(scales)             # Cuz, ya' know, commas in displayed numbers
 
-# Get the Google Analytics View ID from the .Renviron file. This is just a text file
-# that has one line:
-# GA_VIEW_ID="[the actual view ID]"
+# Get the Adobe Analytics credentials and RSID from the .Renviron file. This is just a text file
+# that has three lines:
+
+# ADOBE_KEY="[username]:[account]"
+# ADOBE_SECRET="[API secret]"
+# ADOBE_RSID="[RSID]"
+
 # Don't include the brackets, but do include the quotation marks. You can also simply 
-# hardcode the view ID rather than using Sys.getenv below, but that's less GitHub-
+# hardcode the details rather than using Sys.getenv below, but that's less GitHub-
 # open-sharing-friendly.
-view_id <- Sys.getenv("GA_VIEW_ID")
-# view_id <- "[view ID]"  # Option for hardcoding the view ID (do NOT include brackets)
+## view_id <- Sys.getenv("GA_VIEW_ID")
+## view_id <- "[view ID]"  # Option for hardcoding the view ID (do NOT include brackets)
+
+adobe_key <- Sys.getenv("ADOBE_KEY")
+adobe_secret <- Sys.getenv("ADOBE_SECRET")
+rsid <- Sys.getenv("ADOBE_RSID")
 
 ####################
 # Set up the different options for interaction
@@ -37,25 +46,18 @@ daterange_options <- list("Last 7 Days" = 7,
 # As currently written, these can only be # summable metrics, as the data gets pulled
 # once as daily data and # then gets aggregated (and would require much more 
 # hoop-jumping to then do weighted averages to get 'rates' of any sort).
-metric_options <- list("Sessions" = "sessions",
-                       "Pageviews" = "pageviews",
-                       "Total Events" = "totalEvents",
-                       "Bounces" = "bounces",
-                       "New Users" = "newUsers")
+metric_options <- list("Visits" = "visits",
+                       "Pageviews" = "pageviews")
 
 # DIMENSION OPTIONS
 # The first value can be anything, but the second value needs to be the Google 
 # Analytics API value.
-dimension_options <- list("New vs. Returning" = "userType",
-                          "Device Category" = "deviceCategory",
-                          "Mobile Device Brand" = "mobileDeviceBranding",
-                          "Country" = "country",
+dimension_options <- list("Channel" = "lasttouchchannel",
+                          "Country" = "geocountry",
+                          "Language" = "language",
                           "Browser" = "browser",
-                          "Operating System" = "operatingSystem",
-                          "Default Channel Grouping" = "channelGrouping",
-                          "Source" = "source",
-                          "Medium" = "medium",
-                          "Campaign" = "campaign")
+                          "Device Type" = "mobiledevicetype",
+                          "Operating System" = "operatingsystem")
 
 ####################
 # Define base theme You have an option of tweaking settings
@@ -112,27 +114,47 @@ get_data <- function(daterange, metric, x_dim, y_dim){
   
   # Set up the dimensions being used. If you trace this back, x_dim and y_dim
   # are fed by a reactive conductor.
-  dimensions <- c("date",x_dim, y_dim)
+  ## dimensions <- c("date",x_dim, y_dim)
+  dimensions <- c(x_dim, y_dim)
   
   # Pull the data.
-  ga_data <- google_analytics_4(viewId = view_id,
-                                date_range = c(start_date,end_date),
-                                metrics = metric,
-                                dimensions = dimensions,
-                                anti_sample = TRUE)
+  # Limiting to the top 20 values for each dimension so that, even if
+  # 90 days is selected, the total possible results should still be 
+  # manageable (not bork the API).
+  web_data <- QueueTrended(reportsuite.id = rsid,
+                           date.from = start_date,
+                           date.to = end_date,
+                           metrics = metric,
+                           elements = dimensions,
+                           top = c(20,20),
+                           date.granularity = "day")
+  
+  # The query returns a couple extra columns for segments, and we don't
+  # want those, so just grab the first 4 columns.
+  web_data <- select(web_data,1:4)
+  
+  ## web_data <- google_analytics_4(viewId = view_id,
+  ##                               date_range = c(start_date,end_date),
+  ##                               metrics = metric,
+  ##                               dimensions = dimensions,
+  ##                               anti_sample = TRUE)
   
   # Rename the columns to be generic names -- that just makes it easier
   # for all future transformations
-  colnames(ga_data) <- c("date","dim_x","dim_y","metric")
-
+  colnames(web_data) <- c("date","dim_x","dim_y","metric")
+  
+  # Convert the date column to be a character rather than POSIXlt
+  web_data$date <- as.Date(web_data$date)
+  
   # We want to return the entire data frame -- not just the column names,
   # so throw the data frame here as the last object in the function.
-  ga_data
+  web_data
   
 }
 
-# Authorize Google Analytics
-ga_auth()
+# Authorize the web analytics platform(s)
+## ga_auth()
+SCAuth(adobe_key,adobe_secret)
 
 ######################
 # Define the UI
@@ -143,7 +165,7 @@ ui <- fluidPage(
   theme = "cosmo",   # Change to a different theme to slightly alter the look and feel as desired
   
   # Application title
-  titlePanel("Google Analytics 2-D Data Explorer"),
+  titlePanel("Adobe Analytics 2-D Data Explorer"),
   
   # Sidebar with the user-controllable inputs 
   sidebarLayout(
@@ -160,15 +182,15 @@ ui <- fluidPage(
       # The metric dropdown
       selectInput("metric", label = "Select a metric:", 
                   choices = metric_options, 
-                  selected = "sessions"),
-
+                  selected = "visits"),
+      
       # Horizontal line just to break up the settings a bit.
       tags$hr(style="border-color: #777777;"),
       
       # The dimension selector (dropdown) for the X-dimension
       selectInput("x_dim", label = "Select the X dimension and how many values to show:", 
                   choices = dimension_options, 
-                  selected = "userType"),
+                  selected = "operatingsystem"),
       
       # Select the max number of values to show in the X dimension
       sliderInput("dim_x_count",
@@ -179,11 +201,11 @@ ui <- fluidPage(
       
       # Horizontal line just to break up the settings a bit.
       tags$hr(style="border-color: #777777;"),
-    
+      
       # The dimension selector (dropdown) for the X-dimension
       selectInput("y_dim", label = "Select the Y dimension and how many values to show:", 
                   choices = dimension_options, 
-                  selected = "deviceCategory"),
+                  selected = "geocountry"),
       
       # Select the max number of values to show in the Y dimension
       sliderInput("dim_y_count",
