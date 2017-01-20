@@ -1,23 +1,20 @@
 #
-# App to explore Google Analytics metrics across two dimensions. The only REQUIRED
-# setup to get this to run is the either the hardcoding of a view_id or the creation
-# of a .Renviron file with a GA_VIEW_ID defined. This is detailed in the first lengthy
-# comment below.
+# App to explore Google Analytics metrics across two dimensions. The user has to authenticate
+# and choose a view.
 #
 
 library(shiny)              # We must web-enable this whole thing
+
+# There's a wrinkle for running this on shinyapps.io that requires using the Github
+# version of googleAuthR. See: https://twitter.com/ryanpraski/status/783754506681155584
+library(googleAuthR)        # To prompt for authentication by the user
+
 library(googleAnalyticsR)   # For the pulling of the data
 library(tidyverse)          # For data transformations -- primarily just uses dplyr commands
 library(scales)             # Cuz, ya' know, commas in displayed numbers
 
-# Get the Google Analytics View ID from the .Renviron file. This is just a text file
-# that has one line:
-# GA_VIEW_ID="[the actual view ID]"
-# Don't include the brackets, but do include the quotation marks. You can also simply 
-# hardcode the view ID rather than using Sys.getenv below, but that's less GitHub-
-# open-sharing-friendly.
-view_id <- Sys.getenv("GA_VIEW_ID")
-# view_id <- "[view ID]"  # Option for hardcoding the view ID (do NOT include brackets)
+# options("googleAuthR.webapp.client_id" = "[GOOOGLE APP CLIENT ID]")
+# options("googleAuthR.webapp.client_secret" = "[GOOOGLE APP CLIENT SECRET]")
 
 ####################
 # Set up the different options for interaction
@@ -104,33 +101,6 @@ calc_dim_y_includes <- function(data, dim_count){
     arrange(total) %>% top_n(dim_count, total) %>% select(dim_y) 
 }
 
-get_data <- function(daterange, metric, x_dim, y_dim){
-  
-  # Calculate the start and end dates.
-  start_date <- as.character(Sys.Date()-as.numeric(daterange)-1)
-  end_date <- as.character(Sys.Date()-1)
-  
-  # Set up the dimensions being used. If you trace this back, x_dim and y_dim
-  # are fed by a reactive conductor.
-  dimensions <- c("date",x_dim, y_dim)
-  
-  # Pull the data.
-  ga_data <- google_analytics_4(viewId = view_id,
-                                date_range = c(start_date,end_date),
-                                metrics = metric,
-                                dimensions = dimensions,
-                                anti_sample = TRUE)
-  
-  # Rename the columns to be generic names -- that just makes it easier
-  # for all future transformations
-  colnames(ga_data) <- c("date","dim_x","dim_y","metric")
-  
-  # We want to return the entire data frame -- not just the column names,
-  # so throw the data frame here as the last object in the function.
-  ga_data
-  
-}
-
 # Authorize Google Analytics
 ga_auth()
 
@@ -140,14 +110,29 @@ ga_auth()
 
 ui <- fluidPage(
   
+  # Add Google Tag Manager
+  tags$head(includeScript("gtm.js")),
+  
   theme = "cosmo",   # Change to a different theme to slightly alter the look and feel as desired
   
   # Application title
   titlePanel("Google Analytics 2-D Data Explorer"),
+  "Log in and select a view to explore how a metric breaks down across two dimensions.",
+  "Adjust the sliders to vary the number of values to include in the display, and adjust ",
+  "the dropdowns to change the dimensions and metric being used.",
+  
+  tags$hr(),
   
   # Sidebar with the user-controllable inputs 
   sidebarLayout(
     sidebarPanel(
+      
+      # Get the user to log in and then select a view
+      googleAuthUI("login"),
+      authDropdownUI("auth_menu"),
+
+      # Horizontal line just to break up the settings a bit.
+      tags$hr(style="border-color: #777777;"),
       
       # The date range dropdown, including a default value
       selectInput("daterange", label = "Select a date range:", 
@@ -174,7 +159,7 @@ ui <- fluidPage(
       sliderInput("dim_x_count",
                   label = NULL,
                   min = 1,
-                  max = 5,
+                  max = 10,
                   value = 3),
       
       # Horizontal line just to break up the settings a bit.
@@ -189,7 +174,7 @@ ui <- fluidPage(
       sliderInput("dim_y_count",
                   label = NULL,
                   min = 1,
-                  max = 8,
+                  max = 10,
                   value = 6)
     ),
     
@@ -210,9 +195,57 @@ ui <- fluidPage(
 
 server <- function(input, output) {
   
-  # Reactive conductor to get the base data for use elsewhere
-  base_data <- reactive({get_data(input$daterange, input$metric, input$x_dim, input$y_dim)})
+  # Get the view ID (user-selected). I'd be lying if I said I fully understood this
+  # piece -- pretty much lifted it straight from Mark Edmondson's example at:
+  # http://code.markedmondson.me/googleAnalyticsR/shiny.html
+  token <- callModule(googleAuth, "login")
   
+  ga_account <- reactive({
+    validate(
+      need(token(), "Authenticate")
+    )
+    with_shiny(google_analytics_account_list, shiny_access_token = token())
+  })
+  
+  view_id <- callModule(authDropdown, "auth_menu", ga.table = ga_account)
+  
+  # Get auth code from return URL
+  access_token  <- callModule(googleAuth, "auth1")
+  
+  # Function to actually pull the data. I'm a little concerned that this may be
+  # running twice every time a new API call is triggered -- had it working
+  # as a reactive conductor function originally so this wouldn't be the case,
+  # but I couldn't manage to keep that structure once I introduced the Google
+  # login.
+  base_data <- reactive({
+ 
+    # Calculate the start and end dates.
+    start_date <- as.character(Sys.Date()-as.numeric(input$daterange)-1)
+    end_date <- as.character(Sys.Date()-1)
+    
+    # Set up the dimensions being used. If you trace this back, x_dim and y_dim
+    # are fed by a reactive conductor.
+    dimensions <- c("date",input$x_dim, input$y_dim)
+    
+    # Pull the data.
+    ga_data <- with_shiny(google_analytics,
+                          id = view_id(),
+                          start = start_date,
+                          end = end_date,
+                          metrics = input$metric,
+                          dimensions = dimensions,
+                          shiny_access_token = access_token())
+    
+    # Rename the columns to be generic names -- that just makes it easier
+    # for all future transformations
+    colnames(ga_data) <- c("date","dim_x","dim_y","metric")
+    
+    # We want to return the entire data frame -- not just the column names,
+    # so throw the data frame here as the last object in the function.
+    ga_data
+    
+  })
+
   # We want to get the "top X" values for each dimension based on the dim_x_count 
   # settings. We're going to use these values in a few places, so we're setting them
   # up as reactive conductors
@@ -222,12 +255,16 @@ server <- function(input, output) {
   # Build the heatmap
   output$heatmap <- renderPlot({
     
+    req(access_token())
+    
     x_includes <- dim_x_includes()
     y_includes <- dim_y_includes()
     
+    plot_data <- base_data()
+    
     # Filter the data down to just include the "top X" dimensions (for both values) and
     # then total them up.
-    plot_totals <- base_data() %>% as.data.frame() %>% 
+    plot_totals <- plot_data %>% as.data.frame() %>% 
       filter(dim_x %in% x_includes$dim_x, dim_y %in% y_includes$dim_y) %>%
       group_by(dim_x, dim_y) %>% 
       summarise(total = sum(metric))
@@ -245,10 +282,14 @@ server <- function(input, output) {
   
   output$sparklines <- renderPlot({
     
+    req(access_token())
+    
     x_includes <- dim_x_includes()
     y_includes <- dim_y_includes()
     
-    plot_trends <- filter(base_data(), dim_x %in% x_includes$dim_x, dim_y %in% y_includes$dim_y)
+    plot_data <- base_data()
+    
+    plot_trends <- filter(plot_data, dim_x %in% x_includes$dim_x, dim_y %in% y_includes$dim_y)
     
     # To control the facet order, we need to change dim1 and dim2 to be factors. The
     # order comes from the dim_x_includes$dimx values
