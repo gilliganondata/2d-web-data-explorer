@@ -1,5 +1,5 @@
 # Shinyapps rsconnect components
-*.dcf
+rsconnect/
 
 # Google Tag Manager JS include file
 gtm.js
