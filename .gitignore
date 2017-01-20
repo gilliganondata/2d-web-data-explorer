@@ -1,3 +1,9 @@
+# Shinyapps rsconnect components
+*.dcf
+
+# Google Tag Manager JS include file
+gtm.js
+
 # Environment files
 .Renviron
 
