@@ -13,8 +13,8 @@ library(googleAnalyticsR)   # For the pulling of the data
 library(tidyverse)          # For data transformations -- primarily just uses dplyr commands
 library(scales)             # Cuz, ya' know, commas in displayed numbers
 
-# options("googleAuthR.webapp.client_id" = "[GOOOGLE APP CLIENT ID]")
-# options("googleAuthR.webapp.client_secret" = "[GOOOGLE APP CLIENT SECRET]")
+# options("googleAuthR.webapp.client_id" = "[GOOGLE CLIENT ID HERE")
+# options("googleAuthR.webapp.client_secret" = "[GOOGLE APP SECRET HERE]")
 
 ####################
 # Set up the different options for interaction
@@ -110,7 +110,8 @@ ga_auth()
 
 ui <- fluidPage(
   
-  # Add Google Tag Manager
+  # Include Google Tag Manager container (put the file in the same
+  # folder as app.R). Remove the <script> tags and the comments from the GTM script.
   tags$head(includeScript("gtm.js")),
   
   theme = "cosmo",   # Change to a different theme to slightly alter the look and feel as desired
@@ -127,8 +128,9 @@ ui <- fluidPage(
   sidebarLayout(
     sidebarPanel(
       
-      # Get the user to log in and then select a view
-      googleAuthUI("login"),
+      # Get the user to log in and then select a view. This uses the JS version
+      # because it seems to be less finicky.
+      gar_auth_jsUI("auth_module", login_text = "Login with Google"),
       authDropdownUI("auth_menu"),
 
       # Horizontal line just to break up the settings a bit.
@@ -197,20 +199,23 @@ server <- function(input, output) {
   
   # Get the view ID (user-selected). I'd be lying if I said I fully understood this
   # piece -- pretty much lifted it straight from Mark Edmondson's example at:
-  # http://code.markedmondson.me/googleAnalyticsR/shiny.html
-  token <- callModule(googleAuth, "login")
+  # http://code.markedmondson.me/googleAnalyticsR/shiny.html. Except... used the
+  # JS option: https://mark.shinyapps.io/googleAuthRMarkdown/
+  access_token <- callModule(gar_auth_js, "auth_module")
   
+  # Get the accounts list
   ga_account <- reactive({
     validate(
-      need(token(), "Authenticate")
+      need(access_token(), "Authenticate")
     )
-    with_shiny(google_analytics_account_list, shiny_access_token = token())
+    
+    with_shiny(google_analytics_account_list, shiny_access_token = access_token())
   })
   
   view_id <- callModule(authDropdown, "auth_menu", ga.table = ga_account)
   
   # Get auth code from return URL
-  access_token  <- callModule(googleAuth, "auth1")
+  # access_token  <- callModule(googleAuth, "auth1")
   
   # Function to actually pull the data. I'm a little concerned that this may be
   # running twice every time a new API call is triggered -- had it working
@@ -255,6 +260,7 @@ server <- function(input, output) {
   # Build the heatmap
   output$heatmap <- renderPlot({
     
+    # Make sure an access token is present before trying to render anything
     req(access_token())
     
     x_includes <- dim_x_includes()
@@ -282,6 +288,7 @@ server <- function(input, output) {
   
   output$sparklines <- renderPlot({
     
+    # Make sure an access token is present before trying to render anything
     req(access_token())
     
     x_includes <- dim_x_includes()
