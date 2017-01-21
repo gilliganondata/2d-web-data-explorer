@@ -13,8 +13,8 @@ library(googleAnalyticsR)   # For the pulling of the data
 library(tidyverse)          # For data transformations -- primarily just uses dplyr commands
 library(scales)             # Cuz, ya' know, commas in displayed numbers
 
-# options("googleAuthR.webapp.client_id" = "[GOOGLE CLIENT ID HERE")
-# options("googleAuthR.webapp.client_secret" = "[GOOGLE APP SECRET HERE]")
+# options("googleAuthR.webapp.client_id" = "[GOOGLE APP CLIENT ID]")
+# options("googleAuthR.webapp.client_secret" = "[GOOGLE APP CLIENT SECRET]")
 
 ####################
 # Set up the different options for interaction
@@ -23,7 +23,7 @@ library(scales)             # Cuz, ya' know, commas in displayed numbers
 # DATE OPTIONS
 # This could also be set as date selectors easily enough, but, for now, it's just set
 # as some preset options. As a note, even though the values are being set as numerics 
-# here, they actually get treated as characters, so they have to be converted to 
+# here, they actually get treated as characters, so they have to be converted 
 # back to numerics when setting start_date in the get_data() function.
 daterange_options <- list("Last 7 Days" = 7,
                           "Last 30 Days" = 30,
@@ -101,9 +101,6 @@ calc_dim_y_includes <- function(data, dim_count){
     arrange(total) %>% top_n(dim_count, total) %>% select(dim_y) 
 }
 
-# Authorize Google Analytics
-ga_auth()
-
 ######################
 # Define the UI
 ######################
@@ -128,11 +125,17 @@ ui <- fluidPage(
   sidebarLayout(
     sidebarPanel(
       
-      # Get the user to log in and then select a view. This uses the JS version
-      # because it seems to be less finicky.
-      gar_auth_jsUI("auth_module", login_text = "Login with Google"),
+      # A bit of a hack, I suspect, but just centering the login button
+      tags$div(style="text-align: center;",
+               
+               # Get the user to log in and then select a view. This uses the JS version
+               # because it seems to be less finicky.
+               gar_auth_jsUI("auth_module", login_text = "Login with Google")
+      ),
+      
+      # Get the account/property/view
       authDropdownUI("auth_menu"),
-
+      
       # Horizontal line just to break up the settings a bit.
       tags$hr(style="border-color: #777777;"),
       
@@ -223,7 +226,7 @@ server <- function(input, output) {
   # but I couldn't manage to keep that structure once I introduced the Google
   # login.
   base_data <- reactive({
- 
+    
     # Calculate the start and end dates.
     start_date <- as.character(Sys.Date()-as.numeric(input$daterange)-1)
     end_date <- as.character(Sys.Date()-1)
@@ -250,7 +253,7 @@ server <- function(input, output) {
     ga_data
     
   })
-
+  
   # We want to get the "top X" values for each dimension based on the dim_x_count 
   # settings. We're going to use these values in a few places, so we're setting them
   # up as reactive conductors
