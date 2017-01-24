@@ -1,8 +1,7 @@
 #
-# App to explore Google Analytics metrics across two dimensions. The only REQUIRED
-# setup to get this to run is the either the hardcoding of a view_id or the creation
-# of a .Renviron file with a GA_VIEW_ID defined. This is detailed in the first lengthy
-# comment below.
+# App to explore web analytics data across two dimensions. This version is set to
+# show either Google Analytics data OR Adobe Analytics data. As such, it's limited
+# to dimensions and metrics that are comparable / available in both platforms.
 #
 
 library(shiny)              # We must web-enable this whole thing
