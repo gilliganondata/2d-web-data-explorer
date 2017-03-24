@@ -1,32 +1,44 @@
+# Demo script to pull some data from Yandex Metrics
 #
-# App to explore Adobe Analytics metrics across two dimensions. The only REQUIRED
-# setup to get this to run is the either the hardcoding of API credentials and an RSID
-# or the creation of a .Renviron file with a GA_VIEW_ID defined. This is detailed in 
-# the first lengthy comment below.
+# App to explore Yandex Metrica metrics across two dimensions. The only REQUIRED
+# setup to get this to run is the either the hardcoding of various IDs
+# of a .Renviron file with the IDs defined. This is detailed in the first lengthy
+# comment below.
 #
+# This requires setting up an OAuth access token, which you can do
+# by clicking on "API" in the global navigation once logged into Yandex Metrics.
 
+# Set the callback URL to: http://localhost:1410/
+
+# Add the ID and password to a .Renviron file that looks like this (without the
+# "# " on each line, and without the "[]" brackets):
+
+# YANDEX_APP_ID=[the client ID for your app]
+# YANDEX_APP_PWD=[the password for your app]
+# YANDEX_COUNTER_ID=[the ID for your counter (site), this will be 
+#                    in your reporting interface and will be a ~8-digit #]
+
+# We're only using a couple of libraries. 
+library(httr)               # For accessing the API data
 library(shiny)              # We must web-enable this whole thing
-## library(googleAnalyticsR)   # For the pulling of the data
-library(RSiteCatalyst)      # For pulling the data
 library(tidyverse)          # For data transformations -- primarily just uses dplyr commands
 library(scales)             # Cuz, ya' know, commas in displayed numbers
 
-# Get the Adobe Analytics credentials and RSID from the .Renviron file. This is just a text file
-# that has three lines:
-
-# ADOBE_KEY="[username]:[account]"
-# ADOBE_SECRET="[API secret]"
-# ADOBE_RSID="[RSID]"
-
+# Get the Yandex Counter ID from the .Renviron file. This is just a text file
+# that has one line:
+# YANDEX_COUNTER_ID="[the actual counter ID]"
 # Don't include the brackets, but do include the quotation marks. You can also simply 
-# hardcode the details rather than using Sys.getenv below, but that's less GitHub-
+# hardcode the counter ID rather than using Sys.getenv below, but that's less GitHub-
 # open-sharing-friendly.
-## view_id <- Sys.getenv("GA_VIEW_ID")
-## view_id <- "[view ID]"  # Option for hardcoding the view ID (do NOT include brackets)
+counter_id <- Sys.getenv("YANDEX_COUNTER_ID")
+# counter_id <- "XXXXXXXX"  # Option for hardcoding the counter ID
 
-# adobe_key <- Sys.getenv("ADOBE_KEY")
-# adobe_secret <- Sys.getenv("ADOBE_SECRET")
-# rsid <- Sys.getenv("ADOBE_RSID")
+# Read the values from the .Renviron file
+client_id <- Sys.getenv("YANDEX_APP_ID")
+pwd <- Sys.getenv("YANDEX_APP_PWD")
+
+# Set the preferred language for the results. I assume this is some ISO 2-letter code.
+lang <- "en"
 
 ####################
 # Set up the different options for interaction
@@ -46,18 +58,21 @@ daterange_options <- list("Last 7 Days" = 7,
 # As currently written, these can only be # summable metrics, as the data gets pulled
 # once as daily data and # then gets aggregated (and would require much more 
 # hoop-jumping to then do weighted averages to get 'rates' of any sort).
-metric_options <- list("Visits" = "visits",
-                       "Pageviews" = "pageviews")
+metric_options <- list("Sessions" = "ym:s:visits",
+                       "Pageviews" = "ym:s:pageviews")
 
 # DIMENSION OPTIONS
-# The first value can be anything, but the second value needs to be the Google 
-# Analytics API value.
-dimension_options <- list("Channel" = "lasttouchchannel",
-                          "Country" = "geocountry",
-                          "Language" = "language",
-                          "Browser" = "browser",
-                          "Device Type" = "mobiledevicetype",
-                          "Operating System" = "operatingsystem")
+# The first value can be anything, but the second value needs to be the Yandex 
+# Metrica API value.
+dimension_options <- list("Traffic Source (Last)" = "ym:s:lastTrafficSourceName",
+                          "Traffic Source (First)" = "ym:s:firsstTrafficSourceName",
+                          "Referral (Last)" = "ym:s:lastReferalSource",
+                          "Referral (First)" = "ym:s:firstReferalSource",
+                          "Country" = "ym:s:regionCountry",
+                          "Device Category" = "ym:s:deviceCategory",
+                          "Mobile Device Brand" = "ym:s:mobilePhone	",
+                          "Operating System" = "ym:s:operatingSystemRoot",
+                          "Browser" = "ym:s:browser")
 
 ####################
 # Define base theme You have an option of tweaking settings
@@ -108,53 +123,93 @@ calc_dim_y_includes <- function(data, dim_count){
 
 get_data <- function(daterange, metric, x_dim, y_dim){
   
+#  browser()
+  
   # Calculate the start and end dates.
   start_date <- as.character(Sys.Date()-as.numeric(daterange)-1)
   end_date <- as.character(Sys.Date()-1)
   
   # Set up the dimensions being used. If you trace this back, x_dim and y_dim
   # are fed by a reactive conductor.
-  ## dimensions <- c("date",x_dim, y_dim)
-  dimensions <- c(x_dim, y_dim)
+  dimensions <- c("ym:s:date",x_dim, y_dim)
+  
+  metric <- metric
   
   # Pull the data.
-  # Limiting to the top 20 values for each dimension so that, even if
-  # 90 days is selected, the total possible results should still be 
-  # manageable (not bork the API).
-  web_data <- QueueTrended(reportsuite.id = rsid,
-                           date.from = start_date,
-                           date.to = end_date,
-                           metrics = metric,
-                           elements = dimensions,
-                           top = c(20,20),
-                           date.granularity = "day")
+  ym_data <- GET("https://api-metrika.yandex.ru/stat/v1/data",
+                  query = list (ids = counter_id,
+                                metrics = metric,
+                                date1 = start_date,
+                                date2 = end_date,
+                                dimensions = paste(dimensions, collapse = ","),
+                                lang = lang,
+                                oauth_token = token))
+ 
+  # What gets returned has more in it than we really want, so we need to get
+  # just the *content* of the request and then pretty that up a bit
+  ym_data <- content(ym_data)
+  ym_data <- ym_data$data 
   
-  # The query returns a couple extra columns for segments, and we don't
-  # want those, so just grab the first 4 columns.
-  web_data <- select(web_data,1:4)
+
+  # Depending on the dimensions being brought back, the columns remaining will vary how many values.
+  # So, this is a bit of legerdemaine to name them so we can then go in and strip out what we want.
+  new_names <- c(paste0("dim0_",names(ym_data[[1]]$dimensions[[1]])),
+                 paste0("dim1_",names(ym_data[[1]]$dimensions[[2]])),
+                 paste0("dim2_",names(ym_data[[1]]$dimensions[[3]])),
+                 "metric")
   
-  ## web_data <- google_analytics_4(viewId = view_id,
-  ##                               date_range = c(start_date,end_date),
-  ##                               metrics = metric,
-  ##                               dimensions = dimensions,
-  ##                               anti_sample = TRUE)
+  # Convert that data to a data frame. 
+  ym_data <- data.frame(matrix(unlist(ym_data), 
+                                   nrow=length(ym_data), byrow=T),stringsAsFactors=FALSE) 
+  
+  # Rename the columns to be slightly more descriptive
+  names(ym_data) <- new_names
+  
+  # Drop a few columns that are meta data that we're not going to use (for now)
+  ym_data <- select(ym_data, dim0_name, dim1_name, dim2_name, metric)
   
   # Rename the columns to be generic names -- that just makes it easier
   # for all future transformations
-  colnames(web_data) <- c("date","dim_x","dim_y","metric")
+  colnames(ym_data) <- c("date","dim_x","dim_y","metric")
   
-  # Convert the date column to be a character rather than POSIXlt
-  web_data$date <- as.Date(web_data$date)
+  ym_data$date <- as.Date(ym_data$date)
+  ym_data$metric <- as.numeric(ym_data$metric)
+  
+  ym_data <- arrange(ym_data, date)
   
   # We want to return the entire data frame -- not just the column names,
   # so throw the data frame here as the last object in the function.
-  web_data
+  # ym_data
   
 }
 
-# Authorize the web analytics platform(s)
-## ga_auth()
-SCAuth(adobe_key,adobe_secret)
+###################
+# Authorize Yandex Metrica
+# Lot's o' Greek to me.
+
+# This is fine -- not really *used* for OAuth, part of the oauth_app() call
+app_name <- "yandex_metrica"
+
+# I'm not sure if this is actually getting used in the right place... but it seems to work
+resource_uri <- "https://oauth.yandex.com/authorize?response_type=code"
+
+# Generate the "endpoint." This should prompt as to whether to generate
+# a .httr-oauth file to use as a future reference.
+yandex_endpoint <- oauth_endpoint(authorize = "https://oauth.yandex.com/authorize?response_type=code",
+                                  access = "https://oauth.yandex.com/token?response_type=code")
+
+# Create the "app?" Maybe?
+myapp <- oauth_app(app_name,
+                   key = client_id,
+                   secret = pwd)
+
+# Get the full token.
+mytoken <- oauth2.0_token(yandex_endpoint, myapp,
+                          user_params = list(resource = resource_uri),
+                          use_oob = FALSE)
+
+# Get the actual token string to be used in the query(ies)
+token <- mytoken$credentials$access_token
 
 ######################
 # Define the UI
@@ -165,7 +220,7 @@ ui <- fluidPage(
   theme = "cosmo",   # Change to a different theme to slightly alter the look and feel as desired
   
   # Application title
-  titlePanel("Adobe Analytics 2-D Data Explorer"),
+  titlePanel("Yandex Metrica 2-D Data Explorer"),
   
   # Sidebar with the user-controllable inputs 
   sidebarLayout(
@@ -182,7 +237,7 @@ ui <- fluidPage(
       # The metric dropdown
       selectInput("metric", label = "Select a metric:", 
                   choices = metric_options, 
-                  selected = "visits"),
+                  selected = "ym:s:visits"),
       
       # Horizontal line just to break up the settings a bit.
       tags$hr(style="border-color: #777777;"),
@@ -190,14 +245,14 @@ ui <- fluidPage(
       # The dimension selector (dropdown) for the X-dimension
       selectInput("x_dim", label = "Select the X dimension and how many values to show:", 
                   choices = dimension_options, 
-                  selected = "operatingsystem"),
+                  selected = "ym:s:operatingSystemRoot"),
       
       # Select the max number of values to show in the X dimension
       sliderInput("dim_x_count",
                   label = NULL,
                   min = 1,
-                  max = 5,
-                  value = 2),
+                  max = 10,
+                  value = 3),
       
       # Horizontal line just to break up the settings a bit.
       tags$hr(style="border-color: #777777;"),
@@ -205,14 +260,14 @@ ui <- fluidPage(
       # The dimension selector (dropdown) for the X-dimension
       selectInput("y_dim", label = "Select the Y dimension and how many values to show:", 
                   choices = dimension_options, 
-                  selected = "geocountry"),
+                  selected = "ym:s:browser"),
       
       # Select the max number of values to show in the Y dimension
       sliderInput("dim_y_count",
                   label = NULL,
                   min = 1,
-                  max = 8,
-                  value = 3)
+                  max = 10,
+                  value = 6)
     ),
     
     # Show the heatmap and sparklines
