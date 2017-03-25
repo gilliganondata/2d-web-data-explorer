@@ -24,21 +24,26 @@ library(shiny)              # We must web-enable this whole thing
 library(tidyverse)          # For data transformations -- primarily just uses dplyr commands
 library(scales)             # Cuz, ya' know, commas in displayed numbers
 
-# Get the Yandex Counter ID from the .Renviron file. This is just a text file
-# that has one line:
-# YANDEX_COUNTER_ID="[the actual counter ID]"
-# Don't include the brackets, but do include the quotation marks. You can also simply 
-# hardcode the counter ID rather than using Sys.getenv below, but that's less GitHub-
-# open-sharing-friendly.
-counter_id <- Sys.getenv("YANDEX_COUNTER_ID")
-# counter_id <- "XXXXXXXX"  # Option for hardcoding the counter ID
-
-# Read the values from the .Renviron file
-client_id <- Sys.getenv("YANDEX_APP_ID")
-pwd <- Sys.getenv("YANDEX_APP_PWD")
+# # Get the Yandex Counter ID from the .Renviron file. This is just a text file
+# # that has one line:
+# # YANDEX_COUNTER_ID="[the actual counter ID]"
+# # Don't include the brackets, but do include the quotation marks. You can also simply 
+# # hardcode the counter ID rather than using Sys.getenv below, but that's less GitHub-
+# # open-sharing-friendly.
+# counter_id <- Sys.getenv("YANDEX_COUNTER_ID")
+# # counter_id <- "XXXXXXXX"  # Option for hardcoding the counter ID
+# 
+# # Read the values from the .Renviron file
+# client_id <- Sys.getenv("YANDEX_APP_ID")
+# pwd <- Sys.getenv("YANDEX_APP_PWD")
 
 # Set the preferred language for the results. I assume this is some ISO 2-letter code.
 lang <- "en"
+
+counter_id <- "42846864"
+client_id <- "62cef6b1598d450ba306960aea621060"
+pwd <- "fa81c235e1ce4e969df5b2bf09fcb51f"
+
 
 ####################
 # Set up the different options for interaction
@@ -64,13 +69,12 @@ metric_options <- list("Sessions" = "ym:s:visits",
 # DIMENSION OPTIONS
 # The first value can be anything, but the second value needs to be the Yandex 
 # Metrica API value.
-dimension_options <- list("Traffic Source (Last)" = "ym:s:lastTrafficSourceName",
-                          "Traffic Source (First)" = "ym:s:firsstTrafficSourceName",
-                          "Referral (Last)" = "ym:s:lastReferalSource",
-                          "Referral (First)" = "ym:s:firstReferalSource",
+dimension_options <- list("Traffic Source (Last Touch)" = "ym:s:lastTrafficSourceName",
+                          # "Traffic Source (First)" = "ym:s:firsstTrafficSourceName",
+                          # "Referral (Last)" = "ym:s:lastReferalSource",
+                          # "Referral (First)" = "ym:s:firstReferalSource",
                           "Country" = "ym:s:regionCountry",
                           "Device Category" = "ym:s:deviceCategory",
-                          "Mobile Device Brand" = "ym:s:mobilePhone	",
                           "Operating System" = "ym:s:operatingSystemRoot",
                           "Browser" = "ym:s:browser")
 
@@ -211,6 +215,8 @@ mytoken <- oauth2.0_token(yandex_endpoint, myapp,
 # Get the actual token string to be used in the query(ies)
 token <- mytoken$credentials$access_token
 
+# token <- "AQAAAAAb3ZbmAAQXSn__Q5fuT0IHoO1gqRKJZEY"
+
 ######################
 # Define the UI
 ######################
@@ -245,7 +251,7 @@ ui <- fluidPage(
       # The dimension selector (dropdown) for the X-dimension
       selectInput("x_dim", label = "Select the X dimension and how many values to show:", 
                   choices = dimension_options, 
-                  selected = "ym:s:operatingSystemRoot"),
+                  selected = "ym:s:browser"),
       
       # Select the max number of values to show in the X dimension
       sliderInput("dim_x_count",
@@ -260,14 +266,14 @@ ui <- fluidPage(
       # The dimension selector (dropdown) for the X-dimension
       selectInput("y_dim", label = "Select the Y dimension and how many values to show:", 
                   choices = dimension_options, 
-                  selected = "ym:s:browser"),
+                  selected = "ym:s:lastTrafficSourceName"),
       
       # Select the max number of values to show in the Y dimension
       sliderInput("dim_y_count",
                   label = NULL,
                   min = 1,
                   max = 10,
-                  value = 6)
+                  value = 5)
     ),
     
     # Show the heatmap and sparklines
