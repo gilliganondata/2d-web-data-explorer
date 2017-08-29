@@ -3,6 +3,17 @@
 # and choose a view.
 #
 
+# Two things required to set this up yourself:
+#
+# 1. You'll need to create your own Google Developer Console project. Donal Phipps has put
+#    together a nice video with instructions here: https://www.youtube.com/watch?v=4B88dRbwNfc
+#
+# 2. Set up three variables in a .Renviron file: GAR_WEB_CLIENTID and GAR_WEB_CLIENT_SECRET
+#    come from the project you set up in the previous step. Then, set GAR_SCOPES as
+#    "https://www.googleapis.com/auth/analytics.readonly"
+
+# options(shiny.port = 5893)
+
 library(shiny)              # We must web-enable this whole thing
 
 # There's a wrinkle for running this on shinyapps.io that requires using the Github
@@ -12,9 +23,6 @@ library(googleAuthR)        # To prompt for authentication by the user
 library(googleAnalyticsR)   # For the pulling of the data
 library(tidyverse)          # For data transformations -- primarily just uses dplyr commands
 library(scales)             # Cuz, ya' know, commas in displayed numbers
-
-# options("googleAuthR.webapp.client_id" = "[GOOGLE APP CLIENT ID]")
-# options("googleAuthR.webapp.client_secret" = "[GOOGLE APP CLIENT SECRET]")
 
 ####################
 # Set up the different options for interaction
@@ -31,9 +39,9 @@ daterange_options <- list("Last 7 Days" = 7,
                           "Last 90 Days" = 90)
 
 # METRIC OPTIONS
-# As currently written, these can only be # summable metrics, as the data gets pulled
-# once as daily data and # then gets aggregated (and would require much more 
-# hoop-jumping to then do weighted averages to get 'rates' of any sort).
+# As currently written, these can only be summable metrics, as the data gets pulled
+# once as daily data and then gets aggregated (and would require much more hoop-
+# jumping to then do weighted averages to get 'rates' of any sort).
 metric_options <- list("Sessions" = "sessions",
                        "Pageviews" = "pageviews",
                        "Total Events" = "totalEvents",
@@ -116,8 +124,11 @@ ui <- fluidPage(
   # Application title
   titlePanel("Google Analytics 2-D Data Explorer"),
   "Log in and select a view to explore how a metric breaks down across two dimensions.",
-  "Adjust the sliders to vary the number of values to include in the display, and adjust ",
-  "the dropdowns to change the dimensions and metric being used.",
+  "Adjust the sliders to vary the number of values to include in the display, and adjust",
+  "the dropdowns to change the dimensions and metric being used. The source code for this",
+  "app is available on ",
+  tags$a(href="https://github.com/gilliganondata/2d-web-data-explorer","Github"),
+  ".",
   
   tags$hr(),
   
@@ -180,16 +191,18 @@ ui <- fluidPage(
                   label = NULL,
                   min = 1,
                   max = 10,
-                  value = 6)
-    ),
+                  value = 6)),
     
     # Show the heatmap and sparklines
     mainPanel(
       tags$h4("Heatmap of Metric Totals"),
       plotOutput("heatmap"),
+      tags$br(),
+      tags$em(textOutput("chi_square")),
       tags$hr(),
       tags$h4("Daily Trendlines for the Metric"),
       plotOutput("sparklines")
+      
     )
   )
 )
@@ -212,13 +225,10 @@ server <- function(input, output) {
       need(access_token(), "Authenticate")
     )
     
-    with_shiny(google_analytics_account_list, shiny_access_token = access_token())
+    with_shiny(ga_account_list, shiny_access_token = access_token())
   })
   
   view_id <- callModule(authDropdown, "auth_menu", ga.table = ga_account)
-  
-  # Get auth code from return URL
-  # access_token  <- callModule(googleAuth, "auth1")
   
   # Function to actually pull the data. I'm a little concerned that this may be
   # running twice every time a new API call is triggered -- had it working
@@ -228,7 +238,7 @@ server <- function(input, output) {
   base_data <- reactive({
     
     # Calculate the start and end dates.
-    start_date <- as.character(Sys.Date()-as.numeric(input$daterange)-1)
+    start_date <- as.character(Sys.Date()-as.numeric(input$daterange))
     end_date <- as.character(Sys.Date()-1)
     
     # Set up the dimensions being used. If you trace this back, x_dim and y_dim
@@ -236,10 +246,9 @@ server <- function(input, output) {
     dimensions <- c("date",input$x_dim, input$y_dim)
     
     # Pull the data.
-    ga_data <- with_shiny(google_analytics,
-                          id = view_id(),
-                          start = start_date,
-                          end = end_date,
+    ga_data <- with_shiny(google_analytics_4,
+                          viewId = view_id(),
+                          date_range = c(start_date, end_date),
                           metrics = input$metric,
                           dimensions = dimensions,
                           shiny_access_token = access_token())
@@ -272,13 +281,17 @@ server <- function(input, output) {
     plot_data <- base_data()
     
     # Filter the data down to just include the "top X" dimensions (for both values) and
-    # then total them up.
+    # then total them up. The spread -> gather move at the end is to
+    # get 0s in the emptyy cells.
     plot_totals <- plot_data %>% as.data.frame() %>% 
       filter(dim_x %in% x_includes$dim_x, dim_y %in% y_includes$dim_y) %>%
       group_by(dim_x, dim_y) %>% 
-      summarise(total = sum(metric))
+      summarise(total = sum(metric)) %>% 
+      spread(dim_x, total, fill=0) %>%
+      gather(dim_x, total, -dim_y)
+      
     
-    # Make the totals heatmap
+    # Make the totals heatmap. 
     ggplot(plot_totals, aes(dim_x, dim_y)) + 
       geom_tile(aes(fill = total), color="white", size = 1) +
       scale_fill_gradient(low = "white", high = "green") +
@@ -289,6 +302,46 @@ server <- function(input, output) {
       theme(panel.border = element_rect(fill=NA, colour = "white"))
   })
   
+  # Run a Chi-square test for independence to determine if the two factors (dimensions)
+  # have any apparent relationship
+  output$chi_square <- renderText({
+    
+    # Make sure an access token is present before trying to render anything
+    req(access_token())
+    
+    x_includes <- dim_x_includes()
+    y_includes <- dim_y_includes()
+    
+    plot_data <- base_data()
+    
+    # Filter the data down to just include the "top X" dimensions (for both values) and
+    # then total them up. Then, spread them out to be an actual cross-tab so we
+    # can run the Chi-square test
+    plot_totals <- plot_data %>% as.data.frame() %>% 
+      filter(dim_x %in% x_includes$dim_x, dim_y %in% y_includes$dim_y) %>%
+      group_by(dim_x, dim_y) %>% 
+      summarise(total = sum(metric)) %>%
+      spread(dim_x, total, fill=0)
+    
+    chi_sq <- chisq.test(plot_totals[,-1])
+    
+    if(chi_sq$p.value < 0.000005){
+      result <- "are NOT independent of each other (p-value < 0.000005). "
+    } else {
+      if(chi_sq$p.value < 0.05){
+        result <- paste0("are NOT independent of each other (p-value = ",round(chi_sq$p.value,5),"). ")
+      } else {
+        result <- paste0("ARE independent of each other (p-value = ",round(chi_sq$p.value,5),"). ")
+      }
+    }
+        
+    paste("Based on a Pearson Chi-square test with an alpha level of 0.05, it appears", input$x_dim, "and", input$y_dim, result,
+          "Keep in mind that, with large values and a high number of dimensions (levels) it can be very hard to discard the ",
+          "null hypothesis of independence (I'm still wrestling with this!).")
+    
+  })
+  
+  # Build the sparklines to see the data trended
   output$sparklines <- renderPlot({
     
     # Make sure an access token is present before trying to render anything
@@ -299,6 +352,9 @@ server <- function(input, output) {
     
     plot_data <- base_data()
     
+    # Get the desired data and then convert date to numeric so ggplot doesn't
+    # get too fancy with the x-axis (the values aren't displayed, so a simple
+    # numeric means it will just show them all)
     plot_trends <- filter(plot_data, dim_x %in% x_includes$dim_x, dim_y %in% y_includes$dim_y)
     
     # To control the facet order, we need to change dim1 and dim2 to be factors. The
@@ -312,7 +368,7 @@ server <- function(input, output) {
     # Generate the actual plot. Ideally, the strip labels on the y-axis would be
     # right-justified, but this turns out to be trickier than you would think, and
     # the solutions I found to make that happen...I couldn't get to work.
-    ggplot(plot_trends, aes(date, metric)) +
+    ggplot(plot_trends, aes(x = date, y = metric)) +
       geom_line() +
       facet_grid(dim_y~dim_x,
                  switch = "both") +
