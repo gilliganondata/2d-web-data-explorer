@@ -12,6 +12,8 @@
 #    come from the project you set up in the previous step. Then, set GAR_SCOPES as
 #    "https://www.googleapis.com/auth/analytics.readonly"
 
+# If running locally and want to specify a port so that you don't have to keep updating
+# the Google Developer Console project credentials, uncomment.
 # options(shiny.port = 5893)
 
 library(shiny)              # We must web-enable this whole thing
@@ -251,6 +253,7 @@ server <- function(input, output) {
                           date_range = c(start_date, end_date),
                           metrics = input$metric,
                           dimensions = dimensions,
+                          anti_sample = TRUE,
                           shiny_access_token = access_token())
     
     # Rename the columns to be generic names -- that just makes it easier
@@ -282,7 +285,7 @@ server <- function(input, output) {
     
     # Filter the data down to just include the "top X" dimensions (for both values) and
     # then total them up. The spread -> gather move at the end is to
-    # get 0s in the emptyy cells.
+    # get 0s in the empty cells.
     plot_totals <- plot_data %>% as.data.frame() %>% 
       filter(dim_x %in% x_includes$dim_x, dim_y %in% y_includes$dim_y) %>%
       group_by(dim_x, dim_y) %>% 
@@ -372,8 +375,9 @@ server <- function(input, output) {
       geom_line() +
       facet_grid(dim_y~dim_x,
                  switch = "both") +
-      default_theme +
-      theme(axis.text = element_blank())
+      default_theme
+    # +
+    #   theme(axis.text = element_blank())
     
   })
   
