@@ -64,6 +64,11 @@ dimension_options <- list("New vs. Returning" = "userType",
                           "Medium" = "medium",
                           "Campaign" = "campaign")
 
+# For cleaner conversion later on, let's make this a data frame, too.
+dimensions_lookup <- do.call(rbind, dimension_options) %>% data.frame()
+dimensions_lookup$clean_name <- rownames(dimensions_lookup)
+names(dimensions_lookup) <- c("api_name","clean_name")
+
 ####################
 # Define base theme You have an option of tweaking settings
 # here OR in the actual functions/output that use default_theme
@@ -200,7 +205,7 @@ ui <- fluidPage(
       tags$h4("Heatmap of Metric Totals"),
       plotOutput("heatmap"),
       tags$br(),
-      tags$em(textOutput("chi_square")),
+      tags$em(uiOutput("chi_square")),
       tags$hr(),
       tags$h4("Daily Trendlines for the Metric"),
       plotOutput("sparklines")
@@ -329,18 +334,25 @@ server <- function(input, output) {
     chi_sq <- chisq.test(plot_totals[,-1])
     
     if(chi_sq$p.value < 0.000005){
-      result <- "are NOT independent of each other (p-value < 0.000005). "
+      result <- paste0("are NOT independent of each other (p-value < 0.000005). Keep in mind that, ",
+                       "with large values and a high number of dimensions (levels) it can be very hard ",
+                       "to discard the null hypothesis of independence.")
     } else {
       if(chi_sq$p.value < 0.05){
-        result <- paste0("are NOT independent of each other (p-value = ",round(chi_sq$p.value,5),"). ")
+        result <- paste0("are NOT independent of each other (p-value = ",round(chi_sq$p.value,5),"). Keep in mind that, ",
+                         "with large values and a high number of dimensions (levels) it can be very hard ",
+                         "to discard the null hypothesis of independence.")
       } else {
         result <- paste0("ARE independent of each other (p-value = ",round(chi_sq$p.value,5),"). ")
       }
     }
-        
-    paste("Based on a Pearson Chi-square test with an alpha level of 0.05, it appears", input$x_dim, "and", input$y_dim, result,
-          "Keep in mind that, with large values and a high number of dimensions (levels) it can be very hard to discard the ",
-          "null hypothesis of independence (I'm still wrestling with this!).")
+    
+    # Get the clean names for the selected dimensions
+    x_clean <- filter(dimensions_lookup, api_name == input$x_dim) %>% select(clean_name) %>% as.character()
+    y_clean <- filter(dimensions_lookup, api_name == input$y_dim) %>% select(clean_name) %>% as.character()
+    
+    HTML("Based on a <a href=\"http://www.dartistics.com/cross-tab-w-chi-square.html\" target=\"_blank\">Pearson Chi-square test</a>",
+         "with an alpha level of 0.05, it appears <b>", x_clean, "</b> and <b>", y_clean,"</b>", result)
     
   })
   
@@ -375,9 +387,8 @@ server <- function(input, output) {
       geom_line() +
       facet_grid(dim_y~dim_x,
                  switch = "both") +
-      default_theme
-    # +
-    #   theme(axis.text = element_blank())
+      default_theme +
+      theme(axis.text = element_blank())
     
   })
   
